@@ -1,0 +1,306 @@
+{
+    "Description": "AWS CloudFormation Template that launches a single nginx instance",
+    "Outputs": {
+        "URL": {
+            "Description": "The URL of the website",
+            "Value": {
+                "Fn::Join": [
+                    "",
+                    [
+                        "http://",
+                        {
+                            "Fn::GetAtt": [
+                                "Instance",
+                                "PublicDnsName"
+                            ]
+                        }
+                    ]
+                ]
+            }
+        }
+    },
+    "Parameters": {
+        "AMIID": {
+            "Default": "ami-2a69aa47",
+            "Description": "AMI for the EC2 Instance. Default is Paravirtual Amazon Linux AMI in us-east-1",
+            "Type": "String"
+        },
+        "DeleteOnTerm": {
+            "Default": "true",
+            "Description": "Determines whether to delete the volume on instance termination. The default value is true",
+            "Type": "String"
+        },
+        "InstanceType": {
+            "AllowedValues": [
+                "t1.micro",
+                "m1.small",
+                "m1.medium",
+                "m1.large",
+                "m2.xlarge",
+                "m2.2xlarge",
+                "m2.4xlarge",
+                "c1.medium",
+                "c1.xlarge",
+                "h1.4xlarge",
+                "m3.xlarge",
+                "m3.2xlarge"
+            ],
+            "ConstraintDescription": "must be a valid EC2 instance type.",
+            "Default": "m1.small",
+            "Description": "EC2 instance type",
+            "Type": "String"
+        },
+        "KeyName": {
+            "Default": "malford",
+            "Description": "Key pair name to use",
+            "Type": "String"
+        }
+    },
+    "Resources": {
+        "Instance": {
+            "Metadata": {
+                "AWS::CloudFormation::Init": {
+                    "Configure": {
+                        "commands": {
+                            "01_clone_repo": {
+                                "command": "/usr/bin/git clone https://github.com/vitalco/devops_blog /var/git/devops_blog/"
+                            },
+                            "02_install_pip": {
+                                "command": "/usr/bin/easy_install pip"
+                            },
+                            "03_install_requirements": {
+                                "command": "/usr/local/bin/pip install -r /var/git/devops_blog/requirements.txt"
+                            }
+                        }
+                    },
+                    "InstallPackages": {
+                        "packages": {
+                            "yum": {
+                                "git": [],
+                                "nginx": []
+                            }
+                        }
+                    },
+                    "PopulateConfig": {
+                        "files": {
+                            "/etc/cfn/cfn-hup.conf": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "[main]\n",
+                                            "stack=",
+                                            {
+                                                "Ref": "AWS::StackId"
+                                            },
+                                            "\n",
+                                            "region=",
+                                            {
+                                                "Ref": "AWS::Region"
+                                            },
+                                            "\n",
+                                            "interval=1",
+                                            "\n"
+                                        ]
+                                    ]
+                                },
+                                "group": "root",
+                                "mode": "000400",
+                                "owner": "root"
+                            },
+                            "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "[cfn-auto-reloader-hook]\n",
+                                            "triggers=post.update\n",
+                                            "path=Resources.Instance.Metadata.AWS::CloudFormation::Init\n",
+                                            "action=/opt/aws/bin/cfn-init -v ",
+                                            "--stack ",
+                                            {
+                                                "Ref": "AWS::StackName"
+                                            },
+                                            " --resource Instance ",
+                                            "--region ",
+                                            {
+                                                "Ref": "AWS::Region"
+                                            },
+                                            "\n",
+                                            "runas=root\n"
+                                        ]
+                                    ]
+                                }
+                            },
+                            "/etc/init.d/devops_blog": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "#! /bin/sh\n",
+                                            "###\n",
+                                            "# chkconfig: 235 98 55\n",
+                                            "# description: Manages the services you are controlling with the chkconfig command\n",
+                                            "###\n",
+                                            "\n",
+                                            "case \"$1\" in\n",
+                                            "  start)\n",
+                                            "        echo -n \"Starting devops_blog service\"\n",
+                                            "        touch ~/temp.txt\n",
+                                            "        cd /var/git/devops_blog\n",
+                                            "        sudo /usr/bin/python application.py &\n",
+                                            "        ;;\n",
+                                            "  stop)\n",
+                                            "        echo -n \"Stopping devops_blog\"\n",
+                                            "        sudo killall python\n",
+                                            "        ;;\n",
+                                            "\n",
+                                            "  *)\n",
+                                            "        echo \"Usage: /sbin/service devops_blog {start|stop}\"\n",
+                                            "        exit 1\n",
+                                            "esac\n",
+                                            "\n",
+                                            "exit 0\n"
+                                        ]
+                                    ]
+                                },
+                                "group": "root",
+                                "mode": "000755",
+                                "owner": "root"
+                            },
+                            "/etc/nginx/nginx.conf": {
+                                "content": {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            "worker_processes  1;\n",
+                                            "\n",
+                                            "events {\n",
+                                            "worker_connections  1024;\n",
+                                            "}\n",
+                                            "\n",
+                                            "http {\n",
+                                            "include       mime.types;\n",
+                                            "default_type  application/octet-stream;\n",
+                                            "sendfile      on;\n",
+                                            "\n",
+                                            "keepalive_timeout  65;\n",
+                                            "\n",
+                                            "upstream blog_server {\n",
+                                            "server 127.0.0.1:5000 fail_timeout=0;\n",
+                                            "}\n",
+                                            "\n",
+                                            "server {\n",
+                                            "listen       80;\n",
+                                            "server_name  localhost;\n",
+                                            "\n",
+                                            "location / {\n",
+                                            "root   html;\n",
+                                            "proxy_pass http://blog_server;\n",
+                                            "}\n",
+                                            "error_page   500 502 503 504  /50x.html;\n",
+                                            "location = /50x.html {\n",
+                                            "root   html;\n",
+                                            "}\n",
+                                            "}\n",
+                                            "}\n"
+                                        ]
+                                    ]
+                                },
+                                "group": "root",
+                                "mode": "000644",
+                                "owner": "root"
+                            }
+                        }
+                    },
+                    "StartServices": {
+                        "services": {
+                            "sysvinit": {
+                                "cfn-hup": {
+                                    "enabled": "true",
+                                    "ensureRunning": "true",
+                                    "files": [
+                                        "/etc/cfn/cfn-hup.conf",
+                                        "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+                                    ]
+                                },
+                                "devops_blog": {
+                                    "enabled": "true",
+                                    "ensureRunning": "true",
+                                    "files": [
+                                        "/etc/init.d/devops_blog"
+                                    ]
+                                },
+                                "nginx": {
+                                    "enabled": "true",
+                                    "ensureRunning": "true",
+                                    "files": [
+                                        "/etc/nginx/conf.d/default.conf"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "configSets": {
+                        "default": [
+                            "InstallPackages",
+                            "PopulateConfig",
+                            "Configure",
+                            "StartServices"
+                        ]
+                    }
+                }
+            },
+            "Properties": {
+                "ImageId": {
+                    "Ref": "AMIID"
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "SecurityGroups": [
+                    {
+                        "Ref": "InstanceSecurityGroup"
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash\n",
+                                "/opt/aws/bin/cfn-init --region ",
+                                {
+                                    "Ref": "AWS::Region"
+                                },
+                                "    -s ",
+                                {
+                                    "Ref": "AWS::StackName"
+                                },
+                                " -r Instance\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "Type": "AWS::EC2::Instance"
+        },
+        "InstanceSecurityGroup": {
+            "Properties": {
+                "GroupDescription": "Security group",
+                "SecurityGroupIngress": [
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "FromPort": "80",
+                        "IpProtocol": "tcp",
+                        "ToPort": "80"
+                    }
+                ]
+            },
+            "Type": "AWS::EC2::SecurityGroup"
+        }
+    }
+}
